@@ -1,7 +1,9 @@
 package netai.webbrowser.WebBrowser;
 
+import android.Manifest;
 import android.app.*;
 import android.content.*;
+import android.content.pm.PackageManager;
 import android.graphics.*;
 import android.net.Uri;
 import android.net.http.SslCertificate;
@@ -13,6 +15,8 @@ import android.view.*;
 import android.view.inputmethod.EditorInfo;
 import android.webkit.*;
 import android.widget.*;
+
+import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 import java.io.File;
 import java.util.ArrayList;
@@ -21,9 +25,11 @@ import android.os.Build;
 import android.view.Window;
 import android.view.WindowInsetsController;
 import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
 import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 
-public class MainActivity extends Activity {
+public class MainActivity extends AppCompatActivity {
 
     EditText ed1;
     Button bt2, bt3, menubtn, bt5, prnt, psrc, tabsBtn;
@@ -39,10 +45,12 @@ public class MainActivity extends Activity {
     String Address;
     String currentUrl;
 
-    ValueCallback<Uri[]> filePathCallback;
-    Uri cameraUri;
+    private static final int FILE_CHOOSER_REQUEST = 1001;
+    private static final int CAMERA_PERMISSION_REQUEST = 2001;
 
-    static final int FILE_CHOOSER_REQUEST = 1001;
+    private ValueCallback<Uri[]> filePathCallback;
+    private Uri cameraUri;
+    private boolean pendingFileChooser = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -52,17 +60,13 @@ public class MainActivity extends Activity {
 
         Window window = getWindow();
 
-        window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-        window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
+        WindowCompat.setDecorFitsSystemWindows(window, true);
 
-        /* Set status bar color */
-        window.setStatusBarColor(getResources().getColor(R.color.colorPrimary));
+        WindowInsetsControllerCompat controller =
+                new WindowInsetsControllerCompat(window, window.getDecorView());
 
-        /* Remove light status bar (this is causing white) */
-        View decor = window.getDecorView();
-        decor.setSystemUiVisibility(
-                decor.getSystemUiVisibility() & ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-        );
+        controller.setAppearanceLightStatusBars(false);
+        controller.setAppearanceLightNavigationBars(false);
 
 
         ed1 = findViewById(R.id.editText);
@@ -174,10 +178,29 @@ public class MainActivity extends Activity {
             WebView w = getCurrentWeb();
             w.loadUrl("view-source:"+w.getUrl());
         });
+
+        if (savedInstanceState != null) {
+            pendingFileChooser = savedInstanceState.getBoolean("pendingFileChooser", false);
+        }
     }
+    @Override
+    public void onUserLeaveHint() {
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+
+            PictureInPictureParams params =
+                    new PictureInPictureParams.Builder().build();
+
+            enterPictureInPictureMode(params);
+        }
+    }
     /* ---------------- TAB SYSTEM ---------------- */
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
 
+        outState.putBoolean("pendingFileChooser", pendingFileChooser);
+    }
     public void openTabsWindow() {
 
         // If already open, do nothing
@@ -237,7 +260,7 @@ public class MainActivity extends Activity {
                 );
 
         web.setLayoutParams(params);
-
+        web.setOverScrollMode(View.OVER_SCROLL_NEVER);
         WebSettings ws = web.getSettings();
         ws.setJavaScriptEnabled(true);
         ws.setDomStorageEnabled(true);
@@ -245,26 +268,28 @@ public class MainActivity extends Activity {
         ws.setAllowFileAccess(true);
         ws.setAllowContentAccess(true);
         ws.setUseWideViewPort(true);
-        ws.setLoadWithOverviewMode(true);
+        ws.setLoadWithOverviewMode(false);
         ws.setBuiltInZoomControls(true);
         ws.setDisplayZoomControls(false);
         ws.setSupportMultipleWindows(true);
         ws.setJavaScriptCanOpenWindowsAutomatically(true);
         ws.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         ws.setMediaPlaybackRequiresUserGesture(false);
-        ws.setAllowFileAccessFromFileURLs(true);
-        ws.setAllowUniversalAccessFromFileURLs(true);
+        ws.setAllowFileAccessFromFileURLs(false);
+        ws.setAllowUniversalAccessFromFileURLs(false);
         ws.setSavePassword(false);
-        ws.setAllowFileAccess(false);
-        ws.setAllowContentAccess(false);
         // Private session style cache
         ws.setCacheMode(WebSettings.LOAD_NO_CACHE);
+        ws.setSaveFormData(false);
+        ws.setDatabaseEnabled(false);
 
         ws.setUserAgentString(
-                "Mozilla/5.0 (Linux; Android 16; Mobile) AppleWebKit/537.36 " +
-                        "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+                "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 " +
+                        "(KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36"
         );
-
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            ws.setSafeBrowsingEnabled(true);
+        }
         web.setWebChromeClient(new BrowserChromeClient());
         web.setWebViewClient(new BrowserClient());
         CookieManager cookieManager = CookieManager.getInstance();
@@ -338,62 +363,130 @@ public class MainActivity extends Activity {
     class BrowserChromeClient extends WebChromeClient {
 
         @Override
-        public boolean onShowFileChooser(WebView webView,
-                                         ValueCallback<Uri[]> filePathCallback,
-                                         FileChooserParams fileChooserParams) {
+        public boolean onShowFileChooser(
+                WebView webView,
+                ValueCallback<Uri[]> filePathCallback,
+                FileChooserParams fileChooserParams
+        ) {
 
             MainActivity.this.filePathCallback = filePathCallback;
 
-            Intent cameraIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+            // Check camera permission
+            if (ContextCompat.checkSelfPermission(
+                    MainActivity.this,
+                    android.Manifest.permission.CAMERA
+            ) != PackageManager.PERMISSION_GRANTED) {
 
-            File photoFile = new File(getExternalCacheDir(),
-                    "camera_" + System.currentTimeMillis() + ".jpg");
+                pendingFileChooser = true;
 
-            cameraUri = Uri.fromFile(photoFile);
-            cameraIntent.putExtra(MediaStore.EXTRA_OUTPUT, cameraUri);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    requestPermissions(
+                            new String[]{Manifest.permission.CAMERA},
+                            CAMERA_PERMISSION_REQUEST
+                    );
+                }
 
-            Intent fileIntent = new Intent(Intent.ACTION_GET_CONTENT);
-            fileIntent.setType("*/*");
+                return true;
+            }
 
-            Intent chooser = Intent.createChooser(fileIntent, "Select File");
-            chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[]{cameraIntent});
-
-            startActivityForResult(chooser, FILE_CHOOSER_REQUEST);
+            openFileChooser();
 
             return true;
         }
 
-        public void onProgressChanged(WebView view,int progress){
+        public void onProgressChanged(WebView view, int progress) {
             pbar.setVisibility(View.VISIBLE);
             pbar.setProgress(progress);
-            if(progress==100) pbar.setVisibility(View.GONE);
+
+            if (progress == 100) {
+                pbar.setVisibility(View.GONE);
+            }
         }
+
     }
 
     @Override
-    protected void onActivityResult(int requestCode,int resultCode,Intent data){
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
 
-        if(requestCode == FILE_CHOOSER_REQUEST){
+        if (requestCode == FILE_CHOOSER_REQUEST) {
 
             Uri[] results = null;
 
-            if(resultCode == RESULT_OK){
+            if (resultCode == RESULT_OK) {
 
-                if(data != null)
+                if (data != null && data.getData() != null) {
                     results = new Uri[]{data.getData()};
-                else
+                } else if (cameraUri != null) {
                     results = new Uri[]{cameraUri};
+                }
             }
 
-            if(filePathCallback != null)
+            if (filePathCallback != null)
                 filePathCallback.onReceiveValue(results);
 
             filePathCallback = null;
         }
 
-        super.onActivityResult(requestCode,resultCode,data);
+        super.onActivityResult(requestCode, resultCode, data);
     }
+    @Override
+    public void onRequestPermissionsResult(
+            int requestCode,
+            String[] permissions,
+            int[] grantResults
+    ) {
 
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == CAMERA_PERMISSION_REQUEST) {
+
+            if (grantResults.length > 0 &&
+                    grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+
+                if (pendingFileChooser) {
+                    pendingFileChooser = false;
+                    openFileChooser();
+                }
+
+            } else {
+
+                Toast.makeText(
+                        MainActivity.this,
+                        "Camera permission required",
+                        Toast.LENGTH_LONG
+                ).show();
+            }
+        }
+    }
+    private void openFileChooser() {
+
+        Intent cameraIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+
+        File photoFile = new File(
+                getExternalCacheDir(),
+                "camera_" + System.currentTimeMillis() + ".jpg"
+        );
+
+        cameraUri = androidx.core.content.FileProvider.getUriForFile(
+                MainActivity.this,
+                getPackageName() + ".provider",
+                photoFile
+        );
+
+        cameraIntent.putExtra(MediaStore.EXTRA_OUTPUT, cameraUri);
+        cameraIntent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        cameraIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+        Intent fileIntent = new Intent(Intent.ACTION_GET_CONTENT);
+        fileIntent.addCategory(Intent.CATEGORY_OPENABLE);
+        fileIntent.setType("*/*");
+
+        Intent chooser = new Intent(Intent.ACTION_CHOOSER);
+        chooser.putExtra(Intent.EXTRA_INTENT, fileIntent);
+        chooser.putExtra(Intent.EXTRA_TITLE, "Select File");
+        chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[]{cameraIntent});
+
+        startActivityForResult(chooser, FILE_CHOOSER_REQUEST);
+    }
     /* ---------------- WEBVIEW CLIENT ---------------- */
 
     class BrowserClient extends WebViewClient{
@@ -483,7 +576,14 @@ public class MainActivity extends Activity {
                     "branch.io",
                     "scorecardresearch",
                     "adsystem",
-                    "adservice"
+                    "adservice",
+                    "googlesyndication",
+                    "adservice.google",
+                    "taboola",
+                    "outbrain",
+                    "yandex",
+                    "adnxs",
+                    "amazon-adsystem"
             };
 
             for(String t : trackers){
@@ -495,161 +595,14 @@ public class MainActivity extends Activity {
         }
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-
             String url = request.getUrl().toString();
 
-            if (url == null) return false;
-
-            String lower = url.toLowerCase();
-
-            // -------- PDF HANDLING --------
-            if (isPdf(lower)) {
-
-                AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
-                builder.setTitle("Open PDF");
-
-                builder.setItems(new String[]{
-                        "Preview in Browser",
-                        "Open with PDF App",
-                        "Download"
-                }, (dialog, which) -> {
-
-                    switch (which) {
-
-                        case 0:
-                            view.loadUrl("https://docs.google.com/gview?embedded=true&url=" + url);
-                            break;
-
-                        case 1:
-                            try {
-                                Intent intent = new Intent(Intent.ACTION_VIEW);
-                                intent.setDataAndType(Uri.parse(url), "application/pdf");
-                                intent.setFlags(Intent.FLAG_ACTIVITY_NO_HISTORY);
-                                startActivity(Intent.createChooser(intent, "Open PDF with"));
-                            } catch (Exception e) {
-                                Toast.makeText(MainActivity.this,
-                                        "No PDF viewer installed",
-                                        Toast.LENGTH_LONG).show();
-                            }
-                            break;
-
-                        case 2:
-
-                            DownloadManager.Request req =
-                                    new DownloadManager.Request(Uri.parse(url));
-
-                            req.setMimeType("application/pdf");
-
-                            req.addRequestHeader(
-                                    "cookie",
-                                    CookieManager.getInstance().getCookie(url)
-                            );
-
-                            req.addRequestHeader("User-Agent",
-                                    view.getSettings().getUserAgentString());
-
-                            req.setNotificationVisibility(
-                                    DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
-                            );
-
-                            req.setDestinationInExternalPublicDir(
-                                    Environment.DIRECTORY_DOWNLOADS,
-                                    URLUtil.guessFileName(url, null, "application/pdf")
-                            );
-
-                            DownloadManager dm =
-                                    (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-
-                            dm.enqueue(req);
-
-                            Toast.makeText(MainActivity.this,
-                                    "Downloading PDF",
-                                    Toast.LENGTH_LONG).show();
-                            break;
-                    }
-                });
-
-                builder.show();
+            if (handleExternalApps(url)) {
                 return true;
             }
 
-            // -------- PHONE --------
-            if (lower.startsWith("tel:")) {
-                startActivity(new Intent(Intent.ACTION_DIAL, Uri.parse(url)));
-                return true;
-            }
-
-            // -------- EMAIL --------
-            if (lower.startsWith("mailto:")) {
-                startActivity(new Intent(Intent.ACTION_SENDTO, Uri.parse(url)));
-                return true;
-            }
-
-            // -------- SMS --------
-            if (lower.startsWith("sms:")) {
-                startActivity(new Intent(Intent.ACTION_SENDTO, Uri.parse(url)));
-                return true;
-            }
-
-            // -------- WHATSAPP --------
-            if (lower.startsWith("whatsapp://") || lower.startsWith("https://wa.me/")) {
-                try {
-                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
-                } catch (Exception e) {
-                    Toast.makeText(MainActivity.this,
-                            "WhatsApp not installed",
-                            Toast.LENGTH_LONG).show();
-                }
-                return true;
-            }
-
-            // -------- MAPS --------
-            if (lower.startsWith("geo:") || lower.contains("maps.google.com")) {
-                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
-                return true;
-            }
-
-            // -------- PLAY STORE --------
-            if (lower.startsWith("market://")) {
-                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
-                return true;
-            }
-
-            // -------- INTENT LINKS --------
-            if (lower.startsWith("intent://")) {
-
-                try {
-
-                    Intent intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
-
-                    if (intent.resolveActivity(getPackageManager()) != null) {
-                        startActivity(intent);
-                    } else {
-
-                        String fallback = intent.getStringExtra("browser_fallback_url");
-
-                        if (fallback != null)
-                            view.loadUrl(fallback, extraHeaders);
-                    }
-
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-
-                return true;
-            }
-
-            if(lower.startsWith("file://")){
-                return false;
-            }
-
-            // block unknown schemes
-            if(!lower.startsWith("http://") && !lower.startsWith("https://")){
-                return true;
-            }
-
-            // -------- NORMAL WEB PAGE --------
             return false;
+
         }
     }
     public boolean isPdf(String url){
@@ -709,7 +662,7 @@ public class MainActivity extends Activity {
             if(width <= 0 || height <= 0)
                 return null;
 
-            Bitmap bmp = Bitmap.createBitmap(width,height,Bitmap.Config.ARGB_8888);
+            Bitmap bmp = Bitmap.createBitmap(width,height,Bitmap.Config.RGB_565);
 
             Canvas canvas = new Canvas(bmp);
             web.draw(canvas);
@@ -917,5 +870,114 @@ public class MainActivity extends Activity {
         }
 
         return super.onKeyDown(keyCode,event);
+    }
+    private boolean handleExternalApps(String url) {
+
+        Uri uri = Uri.parse(url);
+        String lower = url.toLowerCase();
+
+        try {
+
+            // INTENT LINKS (Android apps)
+            if (lower.startsWith("intent://")) {
+
+                Intent intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
+
+                if (intent.resolveActivity(getPackageManager()) != null) {
+                    startActivity(intent);
+                } else {
+
+                    String fallback = intent.getStringExtra("browser_fallback_url");
+
+                    if (fallback != null) {
+                        getCurrentWeb().loadUrl(fallback);
+                    }
+                }
+
+                return true;
+            }
+
+            // Tel / Email / SMS
+            if (lower.startsWith("tel:")
+                    || lower.startsWith("mailto:")
+                    || lower.startsWith("sms:")) {
+
+                startActivity(new Intent(Intent.ACTION_VIEW, uri));
+                return true;
+            }
+
+            // WhatsApp
+            if (lower.contains("wa.me")
+                    || lower.contains("api.whatsapp.com")
+                    || lower.startsWith("whatsapp://")) {
+
+                startActivity(new Intent(Intent.ACTION_VIEW, uri));
+                return true;
+            }
+
+            // Telegram
+            if (lower.startsWith("tg://")
+                    || lower.contains("t.me")) {
+
+                startActivity(new Intent(Intent.ACTION_VIEW, uri));
+                return true;
+            }
+
+            // UPI Payments
+            if (lower.startsWith("upi://")) {
+
+                startActivity(new Intent(Intent.ACTION_VIEW, uri));
+                return true;
+            }
+
+            // Google Maps
+            if (lower.startsWith("geo:")
+                    || lower.contains("maps.google")) {
+
+                startActivity(new Intent(Intent.ACTION_VIEW, uri));
+                return true;
+            }
+
+            // Play Store
+            if (lower.startsWith("market://")) {
+
+                startActivity(new Intent(Intent.ACTION_VIEW, uri));
+                return true;
+            }
+
+            // Zoom
+            if (lower.startsWith("zoommtg://")) {
+
+                startActivity(new Intent(Intent.ACTION_VIEW, uri));
+                return true;
+            }
+
+            // Instagram
+            if (lower.contains("instagram.com")) {
+
+                startActivity(new Intent(Intent.ACTION_VIEW, uri));
+                return true;
+            }
+
+            // YouTube
+            if (lower.contains("youtube.com")
+                    || lower.contains("youtu.be")) {
+
+                startActivity(new Intent(Intent.ACTION_VIEW, uri));
+                return true;
+            }
+
+        } catch (Exception e) {
+
+            Toast.makeText(
+                    MainActivity.this,
+                    "Required app not installed",
+                    Toast.LENGTH_SHORT
+            ).show();
+
+            return true;
+        }
+
+        return false;
     }
 }

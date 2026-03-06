@@ -1,28 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
 
-
+    <!-- Secondary progress (lighter orange) -->
     <item android:id="@android:id/secondaryProgress">
         <clip>
             <shape>
                 <gradient
-                    android:startColor="#80ffd300"
-                    android:centerColor="#80ffb600"
+                    android:startColor="#FF8A65"
+                    android:centerColor="#FF7043"
                     android:centerY="0.75"
-                    android:endColor="#a0ffcb00"
-                    android:angle="270"
-                    />
+                    android:endColor="#F4511E"
+                    android:angle="270"/>
             </shape>
         </clip>
     </item>
-    <item
-        android:id="@android:id/progress">
+
+    <!-- Main progress -->
+    <item android:id="@android:id/progress">
         <clip>
             <shape>
                 <gradient
-                    android:startColor="#33FF33"
-                    android:endColor="#008000"
-                    android:angle="270" />
+                    android:startColor="#FF7043"
+                    android:endColor="#F4511E"
+                    android:angle="270"/>
             </shape>
         </clip>
     </item>
